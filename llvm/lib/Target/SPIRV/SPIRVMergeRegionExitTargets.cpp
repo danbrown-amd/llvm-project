@@ -60,7 +60,27 @@ public:
       return Builder.CreateSelect(BI->getCondition(), LHS, RHS);
     }
 
-    // TODO: add support for switch cases.
+    if (auto *SI = dyn_cast<SwitchInst>(T)) {
+      // Start with the value for the default destination (may be nullptr if it
+      // is not an exit target of this region).
+      Value *Result = TargetToValue.lookup(SI->getDefaultDest());
+
+      // For each numbered case, if its successor is an exit target, emit a
+      // select that overrides Result when the switch condition matches that
+      // case value.
+      for (auto &Case : SI->cases()) {
+        Value *CaseVal = TargetToValue.lookup(Case.getCaseSuccessor());
+        if (CaseVal == nullptr)
+          continue;
+        Value *Cmp = Builder.CreateICmpEQ(SI->getCondition(),
+                                          Case.getCaseValue());
+        Result = Builder.CreateSelect(Cmp, CaseVal,
+                                      Result ? Result : CaseVal);
+      }
+
+      return Result;
+    }
+
     llvm_unreachable("Unhandled terminator type.");
   }
 
@@ -137,11 +157,63 @@ public:
     }
 
     // Fix exit branches to redirect to the new exit.
+    // Before redirecting, collect phi incoming values from each Exit block so we
+    // can repair phi nodes in the old ExitTarget blocks afterward.
+    // Map: ExitTarget -> (PHINode -> list of (Exit, incoming_value) pairs)
+    DenseMap<BasicBlock *,
+             DenseMap<PHINode *, SmallVector<std::pair<BasicBlock *, Value *>, 2>>>
+        PhiFixup;
     for (auto Exit : CR->Exits) {
       Instruction *T = Exit->getTerminator();
-      for (auto I = succ_begin(T), E = succ_end(T); I != E; ++I)
-        if (ExitTargets.contains(*I))
-          I.getUse()->set(NewExitTarget);
+      for (auto I = succ_begin(T), E = succ_end(T); I != E; ++I) {
+        BasicBlock *OldTarget = *I;
+        if (!ExitTargets.contains(OldTarget))
+          continue;
+        // Record phi contributions from Exit before redirecting the edge.
+        auto &PhiMap = PhiFixup[OldTarget];
+        for (PHINode &PN : OldTarget->phis()) {
+          int Idx = PN.getBasicBlockIndex(Exit);
+          if (Idx >= 0)
+            PhiMap[&PN].emplace_back(Exit, PN.getIncomingValue(Idx));
+        }
+        I.getUse()->set(NewExitTarget);
+      }
+    }
+
+    // Repair phi nodes in each old ExitTarget: remove the now-invalid incoming
+    // edges from redirected Exit blocks and add a single incoming edge from
+    // NewExitTarget.  When multiple Exit blocks contributed different values to
+    // the same phi, insert a collecting phi in NewExitTarget.
+    for (auto &[OldTarget, PhiMap] : PhiFixup) {
+      for (auto &[PN, Contributions] : PhiMap) {
+        // Remove all incoming edges from the redirected Exit blocks.
+        for (auto &[Exit, Val] : Contributions)
+          PN->removeIncomingValue(Exit, /*DeletePHIIfEmpty=*/false);
+
+        // Determine the single value to add for NewExitTarget.
+        Value *NewVal = Contributions[0].second;
+        if (Contributions.size() > 1) {
+          // Check whether all contributions carry the same value.
+          bool AllSame = true;
+          for (size_t i = 1; i < Contributions.size(); i++) {
+            if (Contributions[i].second != NewVal) {
+              AllSame = false;
+              break;
+            }
+          }
+          if (!AllSame) {
+            // Create a phi in NewExitTarget to merge values from each Exit.
+            IRBuilder<> PhiBuilder(NewExitTarget,
+                                   NewExitTarget->getFirstInsertionPt());
+            PHINode *CollectingPhi =
+                PhiBuilder.CreatePHI(PN->getType(), Contributions.size());
+            for (auto &[Exit, Val] : Contributions)
+              CollectingPhi->addIncoming(Val, Exit);
+            NewVal = CollectingPhi;
+          }
+        }
+        PN->addIncoming(NewVal, NewExitTarget);
+      }
     }
 
     CR = CR->Parent;

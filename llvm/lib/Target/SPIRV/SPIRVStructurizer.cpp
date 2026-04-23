@@ -493,6 +493,42 @@ class SPIRVStructurizer : public FunctionPass {
         replaceBranchTargets(Src, Dst, NewExit);
       }
 
+      // After redirecting all edges, ensure every alloca that is stored in at
+      // least one predecessor of NewExit is also stored in ALL predecessors.
+      // Without this, mem2reg will produce undef phi incoming values for
+      // predecessor blocks that do not define the alloca before branching to
+      // NewExit (e.g. when a switch fallthrough case bypasses a store that the
+      // other cases perform).  Any concrete value works for the missing stores
+      // since they will only be reached on paths that the routing variable
+      // already steers away from the alloca's consumer; we use zero/null to
+      // keep the IR predictable.
+      DenseMap<AllocaInst *, bool> SeenAlloca;
+      for (auto &[Src, Dst] : FixedEdges) {
+        for (Instruction &I : *Src) {
+          if (auto *SI = dyn_cast<StoreInst>(&I))
+            if (auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand()))
+              SeenAlloca[AI] = true;
+        }
+      }
+      for (auto &[Src, Dst] : FixedEdges) {
+        for (auto &[AI, Unused] : SeenAlloca) {
+          bool SrcDefinesAlloca = false;
+          for (Instruction &I : *Src) {
+            if (auto *SI = dyn_cast<StoreInst>(&I)) {
+              if (SI->getPointerOperand() == AI) {
+                SrcDefinesAlloca = true;
+                break;
+              }
+            }
+          }
+          if (!SrcDefinesAlloca) {
+            IRBuilder<> FixupBuilder(Src->getTerminator());
+            FixupBuilder.CreateStore(
+                Constant::getNullValue(AI->getAllocatedType()), AI);
+          }
+        }
+      }
+
       Value *Load = ExitBuilder.CreateLoad(ExitBuilder.getInt32Ty(), Variable);
 
       // If we can avoid an OpSwitch, generate an OpBranch. Reason is some
@@ -535,7 +571,27 @@ class SPIRVStructurizer : public FunctionPass {
       return Builder.CreateSelect(BI->getCondition(), LHS, RHS);
     }
 
-    // TODO: add support for switch cases.
+    if (auto *SI = dyn_cast<SwitchInst>(T)) {
+      // Start with the value for the default destination (may be nullptr if it
+      // is not an exit target of this region).
+      Value *Result = TargetToValue.lookup(SI->getDefaultDest());
+
+      // For each numbered case, if its successor is an exit target, emit a
+      // select that overrides Result when the switch condition matches that
+      // case value.
+      for (auto &Case : SI->cases()) {
+        Value *CaseVal = TargetToValue.lookup(Case.getCaseSuccessor());
+        if (CaseVal == nullptr)
+          continue;
+        Value *Cmp = Builder.CreateICmpEQ(SI->getCondition(),
+                                          Case.getCaseValue());
+        Result = Builder.CreateSelect(Cmp, CaseVal,
+                                      Result ? Result : CaseVal);
+      }
+
+      return Result;
+    }
+
     llvm_unreachable("Unhandled terminator type.");
   }
 
@@ -983,6 +1039,15 @@ class SPIRVStructurizer : public FunctionPass {
         Builder.CreateBr(Target);
         SI->addCase(It->getCaseValue(), NewTarget);
         It = SI->removeCase(It);
+
+        // Update PHI nodes in Target: the new block is now a predecessor
+        // instead of (or in addition to) BB for this case edge, so forward
+        // the same incoming value that BB contributed.
+        for (PHINode &PN : Target->phis()) {
+          Value *InVal = PN.getIncomingValueForBlock(&BB);
+          if (InVal)
+            PN.addIncoming(InVal, NewTarget);
+        }
       }
     }
 
