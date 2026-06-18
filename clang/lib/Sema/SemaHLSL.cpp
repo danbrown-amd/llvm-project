@@ -4175,7 +4175,8 @@ bool SemaHLSL::CheckBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case Builtin::BI__builtin_hlsl_any: {
     if (SemaRef.checkArgCount(TheCall, 1))
       return true;
-    if (CheckAnyScalarOrVector(&SemaRef, TheCall, 0))
+    if (!TheCall->getArg(0)->getType()->isConstantMatrixType() &&
+        CheckAnyScalarOrVector(&SemaRef, TheCall, 0))
       return true;
     break;
   }

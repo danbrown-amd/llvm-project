@@ -2301,6 +2301,9 @@ llvm::Value *CodeGenFunction::EmitFromMemory(llvm::Value *Value, QualType Ty) {
   if (HasBoolRep || Ty->isBitIntType())
     return Builder.CreateTrunc(Value, ResTy, "loadedv");
 
+  if (Ty->isConstantMatrixBoolType())
+    return Builder.CreateTrunc(Value, ResTy, "loadedv");
+
   return Value;
 }
 
