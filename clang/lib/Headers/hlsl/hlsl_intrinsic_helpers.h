@@ -176,6 +176,14 @@ template <typename T> constexpr T fwidth_impl(T input) {
 #endif
 }
 
+template <typename T> constexpr T degrees_impl(T Val) {
+  return Val * 0x1.ca5dc20000000p+5f; // 180 / pi
+}
+
+template <typename T> constexpr T radians_impl(T Val) {
+  return Val * 0x1.1df46a0000000p-6f; // pi / 180
+}
+
 } // namespace __detail
 } // namespace hlsl
 

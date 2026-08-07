@@ -708,7 +708,6 @@ static bool intrinsicHasSideEffects(Intrinsic::ID ID) {
   case Intrinsic::spv_any:
   case Intrinsic::spv_bitcast:
   case Intrinsic::spv_const_composite:
-  case Intrinsic::spv_degrees:
   case Intrinsic::spv_distance:
   case Intrinsic::spv_extractelt:
   case Intrinsic::spv_extractv:
@@ -734,7 +733,6 @@ static bool intrinsicHasSideEffects(Intrinsic::ID ID) {
   case Intrinsic::spv_num_subgroups:
   case Intrinsic::spv_num_workgroups:
   case Intrinsic::spv_ptrcast:
-  case Intrinsic::spv_radians:
   case Intrinsic::spv_reflect:
   case Intrinsic::spv_refract:
   case Intrinsic::spv_resource_getbasepointer:
@@ -5473,8 +5471,6 @@ bool SPIRVInstructionSelector::selectIntrinsic(Register ResVReg,
     return selectExtInst(ResVReg, ResType, I, CL::mix, GL::FMix);
   case Intrinsic::spv_length:
     return selectExtInst(ResVReg, ResType, I, CL::length, GL::Length);
-  case Intrinsic::spv_degrees:
-    return selectExtInst(ResVReg, ResType, I, CL::degrees, GL::Degrees);
   case Intrinsic::spv_faceforward:
     return selectExtInst(ResVReg, ResType, I, GL::FaceForward);
   case Intrinsic::spv_frac:
@@ -5624,8 +5620,6 @@ bool SPIRVInstructionSelector::selectIntrinsic(Register ResVReg,
   case Intrinsic::spv_quad_read_across_diagonal: {
     return selectQuadSwap(ResVReg, ResType, I, /*Direction*/ 2);
   }
-  case Intrinsic::spv_radians:
-    return selectExtInst(ResVReg, ResType, I, CL::radians, GL::Radians);
   // Discard intrinsics which we do not expect to actually represent code after
   // lowering or intrinsics which are not implemented but should not crash when
   // found in a customer's LLVM IR input.

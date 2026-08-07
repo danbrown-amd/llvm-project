@@ -123,7 +123,6 @@ public:
 
   GENERATE_HLSL_INTRINSIC_FUNCTION(All, all)
   GENERATE_HLSL_INTRINSIC_FUNCTION(Any, any)
-  GENERATE_HLSL_INTRINSIC_FUNCTION(Degrees, degrees)
   GENERATE_HLSL_INTRINSIC_FUNCTION(Frac, frac)
   GENERATE_HLSL_INTRINSIC_FUNCTION(FlattenedThreadIdInGroup,
                                    flattened_thread_id_in_group)
@@ -134,7 +133,6 @@ public:
   GENERATE_HLSL_INTRINSIC_FUNCTION(Rsqrt, rsqrt)
   GENERATE_HLSL_INTRINSIC_FUNCTION(Saturate, saturate)
   GENERATE_HLSL_INTRINSIC_FUNCTION(Sign, sign)
-  GENERATE_HLSL_INTRINSIC_FUNCTION(Radians, radians)
   GENERATE_HLSL_INTRINSIC_FUNCTION(ThreadId, thread_id)
   GENERATE_HLSL_INTRINSIC_FUNCTION(GroupThreadId, thread_id_in_group)
   GENERATE_HLSL_INTRINSIC_FUNCTION(GroupId, group_id)
